@@ -6,11 +6,11 @@ from custom_components.hildebrand_glow.statistics import GlowmarktStatisticsImpo
 
 def test_statistic_id_has_valid_object_prefix() -> None:
     importer = object.__new__(GlowmarktStatisticsImporter)
-    importer.entry_id = "123abc"
+    importer.entry_id = "01K3-ABC.XYZ"
 
     assert (
         importer.statistic_id("electricity")
-        == "hildebrand_glow:entry_123abc_electricity_consumption"
+        == "hildebrand_glow:entry_01k3_abc_xyz_electricity_consumption"
     )
 
 

@@ -5,6 +5,7 @@ import asyncio
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 import logging
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -58,7 +59,8 @@ class GlowmarktStatisticsImporter:
 
     def statistic_id(self, fuel: str) -> str:
         """Return a stable statistic ID for one fuel."""
-        return f"{DOMAIN}:entry_{self.entry_id}_{fuel}_consumption"
+        safe_entry_id = re.sub(r"[^a-z0-9]+", "_", self.entry_id.lower()).strip("_")
+        return f"{DOMAIN}:entry_{safe_entry_id}_{fuel}_consumption"
 
     async def async_sync(self, resources: dict[str, dict[str, Any]]) -> None:
         """Import all available finalized consumption data."""
