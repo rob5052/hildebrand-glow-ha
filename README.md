@@ -90,7 +90,7 @@ Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Dail
 
 ### Historical statistics preview
 
-Version 1.2.0 creates the following external statistics independently of the
+Version 1.2.1 creates the following external statistics independently of the
 existing sensor history:
 
 - `Hildebrand Glow Electricity Consumption`

@@ -20,6 +20,7 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
@@ -57,7 +58,7 @@ class GlowmarktStatisticsImporter:
 
     def statistic_id(self, fuel: str) -> str:
         """Return a stable statistic ID for one fuel."""
-        return f"{DOMAIN}:{self.entry_id}_{fuel}_consumption"
+        return f"{DOMAIN}:entry_{self.entry_id}_{fuel}_consumption"
 
     async def async_sync(self, resources: dict[str, dict[str, Any]]) -> None:
         """Import all available finalized consumption data."""
@@ -74,7 +75,7 @@ class GlowmarktStatisticsImporter:
                         fuel,
                         resource["resource_id"],
                     )
-            except (GlowmarktApiError, GlowmarktAuthError) as err:
+            except (GlowmarktApiError, GlowmarktAuthError, HomeAssistantError) as err:
                 self.last_error = str(err)
                 _LOGGER.warning("Historical statistics sync paused: %s", err)
                 return

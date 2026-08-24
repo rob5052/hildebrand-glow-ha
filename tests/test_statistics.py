@@ -4,6 +4,16 @@ from datetime import date, datetime, timedelta, timezone
 from custom_components.hildebrand_glow.statistics import GlowmarktStatisticsImporter
 
 
+def test_statistic_id_has_valid_object_prefix() -> None:
+    importer = object.__new__(GlowmarktStatisticsImporter)
+    importer.entry_id = "123abc"
+
+    assert (
+        importer.statistic_id("electricity")
+        == "hildebrand_glow:entry_123abc_electricity_consumption"
+    )
+
+
 def _half_hours(start: datetime, count: int, value: float = 0.1):
     return [(start + timedelta(minutes=30 * index), value) for index in range(count)]
 
