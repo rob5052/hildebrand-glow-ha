@@ -1,7 +1,7 @@
 # Hildebrand Glow (Bright App) Integration for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/v/release/McDon22/hildebrand-glow-ha)](https://github.com/McDon22/hildebrand-glow-ha/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/rob5052/hildebrand-glow-ha)](https://github.com/rob5052/hildebrand-glow-ha/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebrand Glow / Bright app API.
@@ -49,13 +49,13 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 
 1. Open HACS in Home Assistant
 2. Click the three dots menu → **Custom repositories**
-3. Add `https://github.com/McDon22/hildebrand-glow-ha` as an **Integration**
+3. Add `https://github.com/rob5052/hildebrand-glow-ha` as an **Integration**
 4. Search for "Hildebrand Glow" and click **Download**
 5. Restart Home Assistant
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub](https://github.com/McDon22/hildebrand-glow-ha/releases)
+1. Download the latest release from [GitHub](https://github.com/rob5052/hildebrand-glow-ha/releases)
 2. Extract and copy the `custom_components/hildebrand_glow` folder to your Home Assistant `config/custom_components/` directory
 3. Restart Home Assistant
 
@@ -102,7 +102,7 @@ Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Dail
 
 ### Historical energy statistics
 
-Version 1.3.0 creates the following external statistics independently of the
+Version 1.4.0 creates the following external statistics independently of the
 existing sensor history:
 
 - `Hildebrand Glow Electricity Consumption`
@@ -160,6 +160,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Hildebrand Technology](https://www.hildebrand.co.uk/) for the Glowmarkt API
 - The Home Assistant community
+- [McDon22/hildebrand-glow-ha](https://github.com/McDon22/hildebrand-glow-ha)
+  as the upstream project on which this fork is based
+
+## Development attribution
+
+The tariff entities, Home Assistant statistics integration, historical and
+provisional consumption imports, dated cumulative cost calculations, standing
+charge handling, tests, debugging, and documentation introduced in version
+1.4.0 were designed and implemented by OpenAI ChatGPT/Codex in collaboration
+with Rob Oliver. The implementation was tested against Rob's Home Assistant and
+Hildebrand Bright data before release.
 
 ## Contributing
 
