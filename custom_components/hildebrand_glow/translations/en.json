@@ -8,19 +8,43 @@
       },
       "tariff": {
         "title": "Energy Tariff Configuration",
-        "description": "Enter your energy tariff rates. These can be changed later.",
-        "data": {"electricity_rate": "Electricity Rate (£/kWh)", "electricity_standing_charge": "Electricity Standing Charge (£/day)", "gas_rate": "Gas Rate (£/kWh)", "gas_standing_charge": "Gas Standing Charge (£/day)"}
+        "description": "Enter rates in pounds and the date each tariff became effective (YYYY-MM-DD).",
+        "data": {
+          "electricity_rate": "Electricity Rate (£/kWh)",
+          "electricity_standing_charge": "Electricity Standing Charge (£/day)",
+          "electricity_tariff_effective_date": "Electricity Tariff Effective Date",
+          "gas_rate": "Gas Rate (£/kWh)",
+          "gas_standing_charge": "Gas Standing Charge (£/day)",
+          "gas_tariff_effective_date": "Gas Tariff Effective Date"
+        }
       }
     },
-    "error": {"invalid_auth": "Invalid username or password.", "cannot_connect": "Unable to connect to the Glowmarkt API.", "no_resources": "No smart meter resources found.", "unknown": "An unexpected error occurred."},
+    "error": {
+      "invalid_auth": "Invalid username or password.",
+      "cannot_connect": "Unable to connect to the Glowmarkt API.",
+      "no_resources": "No smart meter resources found.",
+      "unknown": "An unexpected error occurred."
+    },
     "abort": {"already_configured": "This account is already configured."}
   },
   "options": {
     "step": {
       "init": {
         "title": "Update Tariff Configuration",
-        "data": {"electricity_rate": "Electricity Rate (£/kWh)", "electricity_standing_charge": "Electricity Standing Charge (£/day)", "gas_rate": "Gas Rate (£/kWh)", "gas_standing_charge": "Gas Standing Charge (£/day)"}
+        "description": "Enter rates in pounds and the date each tariff became effective (YYYY-MM-DD).",
+        "data": {
+          "electricity_rate": "Electricity Rate (£/kWh)",
+          "electricity_standing_charge": "Electricity Standing Charge (£/day)",
+          "electricity_tariff_effective_date": "Electricity Tariff Effective Date",
+          "gas_rate": "Gas Rate (£/kWh)",
+          "gas_standing_charge": "Gas Standing Charge (£/day)",
+          "gas_tariff_effective_date": "Gas Tariff Effective Date"
+        }
       }
+    },
+    "error": {
+      "invalid_effective_date": "A replacement tariff must start after the existing tariff."
     }
   }
 }
+

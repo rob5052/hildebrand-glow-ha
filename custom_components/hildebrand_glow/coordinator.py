@@ -1,21 +1,33 @@
 """Data update coordinator for Hildebrand Glow integration."""
 from __future__ import annotations
+import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
 from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
+from .statistics import GlowmarktStatisticsImporter
 
 _LOGGER = logging.getLogger(__name__)
 
 class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching Glowmarkt data."""
 
-    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float]) -> None:
+    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, Any], config_entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=DEFAULT_SCAN_INTERVAL)
         self.api_client = api_client
         self.tariff_config = tariff_config
+        self._config_entry = config_entry
+        self.statistics_importer = GlowmarktStatisticsImporter(
+            hass, api_client, config_entry.entry_id, tariff_config
+        )
+        self._statistics_task: asyncio.Task[None] | None = None
+        self._last_statistics_start: datetime | None = None
+        self._last_final_statistics_start: datetime | None = None
+        self._statistics_enabled = False
         self._resources: dict[str, dict[str, Any]] = {}
         self._last_readings: dict[str, float] = {}  # Cache last known good readings
 
@@ -23,6 +35,9 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             if not self._resources:
                 self._resources = await self.api_client.discover_resources()
+
+            if self._statistics_enabled:
+                self._schedule_statistics_sync()
             
             readings = await self.api_client.get_all_readings()
             
@@ -38,7 +53,7 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Use cached readings for the data
             merged_readings = {k: self._last_readings.get(k) for k in readings.keys()}
             
-            data: dict[str, Any] = {"readings": merged_readings, "resources": self._resources, "costs": {}}
+            data: dict[str, Any] = {"readings": merged_readings, "resources": self._resources, "costs": {}, "tariffs": self.tariff_config.copy()}
             
             elec = merged_readings.get("electricity.consumption")
             if elec is not None:
@@ -65,12 +80,45 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except GlowmarktApiError as err:
             raise UpdateFailed(f"API error: {err}") from err
 
+    def _schedule_statistics_sync(self) -> None:
+        """Refresh provisional statistics every 30 minutes and final data every six hours."""
+        if self._statistics_task is not None and not self._statistics_task.done():
+            return
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_statistics_start is not None
+            and now - self._last_statistics_start < timedelta(minutes=30)
+        ):
+            return
+        sync_finalized = (
+            self._last_final_statistics_start is None
+            or now - self._last_final_statistics_start >= timedelta(hours=6)
+        )
+        self._last_statistics_start = now
+        if sync_finalized:
+            self._last_final_statistics_start = now
+        self._statistics_task = self._config_entry.async_create_background_task(
+            self.hass,
+            self.statistics_importer.async_sync(
+                self._resources, sync_finalized=sync_finalized
+            ),
+            name=f"{DOMAIN} historical statistics sync",
+        )
+
+    def start_statistics_sync(self) -> None:
+        """Enable and start historical synchronization after setup completes."""
+        self._statistics_enabled = True
+        self._schedule_statistics_sync()
+
     @property
     def resources(self) -> dict[str, dict[str, Any]]:
         return self._resources
 
-    def update_tariff_config(self, tariff_config: dict[str, float]) -> None:
+    def update_tariff_config(self, tariff_config: dict[str, Any]) -> None:
         self.tariff_config = tariff_config
+        self.statistics_importer.update_tariff_config(tariff_config)
+        self._last_statistics_start = None
+        self._last_final_statistics_start = None
     
     def clear_daily_cache(self) -> None:
         """Clear the cached readings (call at midnight)."""

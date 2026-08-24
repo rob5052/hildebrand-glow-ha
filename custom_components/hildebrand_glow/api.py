@@ -1,5 +1,6 @@
 """Glowmarkt API client for Hildebrand Glow integration."""
 from __future__ import annotations
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -164,6 +165,83 @@ class GlowmarktApiClient:
         except ClientError as err:
             _LOGGER.error("Failed to get reading for %s: %s", resource_id, err)
             return None
+
+    async def get_interval_readings(
+        self,
+        resource_id: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[datetime, float]]:
+        """Return timestamped 30-minute readings for a UTC window.
+
+        Zero-valued readings are retained because zero consumption is valid.
+        Missing values are omitted so they can be distinguished from real zeroes.
+        """
+        await self._ensure_authenticated()
+        start_utc = start.astimezone(timezone.utc)
+        end_utc = end.astimezone(timezone.utc)
+        params = {
+            "from": start_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+            "to": end_utc.strftime("%Y-%m-%dT%H:%M:%S"),
+            "period": "PT30M",
+            "offset": 0,
+            "function": "sum",
+        }
+
+        for attempt in range(5):
+            try:
+                async with self._session.get(
+                    f"{GLOWMARKT_API_BASE}/resource/{resource_id}/readings",
+                    headers=self._get_headers(),
+                    params=params,
+                ) as response:
+                    if response.status == 429:
+                        if attempt == 4:
+                            response.raise_for_status()
+                        retry_after = response.headers.get("Retry-After", "")
+                        delay = float(retry_after) if retry_after.isdigit() else 2**attempt
+                        delay = min(max(delay, 1), 60)
+                        _LOGGER.warning(
+                            "Glowmarkt rate limited readings request; retrying in %.0f seconds",
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    if response.status >= 500 and attempt < 4:
+                        delay = min(2**attempt, 30)
+                        _LOGGER.warning(
+                            "Glowmarkt returned HTTP %s; retrying readings request in %s seconds",
+                            response.status,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    response.raise_for_status()
+                    payload = await response.json()
+                    if payload.get("status") != "OK":
+                        raise GlowmarktApiError(
+                            f"Unexpected readings response: {payload.get('status')}"
+                        )
+
+                    result: dict[datetime, float] = {}
+                    for raw in payload.get("data") or []:
+                        if len(raw) < 2 or raw[1] is None:
+                            continue
+                        timestamp = datetime.fromtimestamp(raw[0], tz=timezone.utc)
+                        if start_utc <= timestamp < end_utc:
+                            result[timestamp] = float(raw[1])
+                    return sorted(result.items())
+            except ClientResponseError as err:
+                raise GlowmarktApiError(
+                    f"Readings request failed: HTTP {err.status} {err.message}"
+                ) from err
+            except ClientError as err:
+                if attempt == 4:
+                    raise GlowmarktApiError(f"Readings request failed: {err}") from err
+                await asyncio.sleep(min(2**attempt, 30))
+
+        raise GlowmarktApiError("Readings request failed after retries")
 
     async def get_all_readings(self) -> dict[str, float | None]:
         if not self._resources:
