@@ -10,7 +10,7 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 
 - **Easy Setup**: Configure through the Home Assistant UI - no YAML required
 - **12 Sensors**: Electricity and gas consumption, tariff rates, API costs, and calculated daily costs with standing charges
-- **Tariff Configuration**: Set your own electricity and gas rates including standing charges
+- **Dated Tariff Configuration**: Set unit rates, standing charges, and their effective dates
 - **Energy Dashboard Compatible**: Works with Home Assistant's Energy Dashboard
 - **Auto Updates**: Data refreshes every 5 minutes
 - **Accurate Historical Usage**: Imports finalized Glowmarkt half-hourly data
@@ -65,8 +65,10 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 5. Configure your tariff rates:
    - Electricity rate (£/kWh)
    - Electricity standing charge (£/day)
+   - Electricity tariff effective date (YYYY-MM-DD)
    - Gas rate (£/kWh)
    - Gas standing charge (£/day)
+   - Gas tariff effective date (YYYY-MM-DD)
 
 ### Updating Tariff Rates
 
@@ -74,27 +76,36 @@ To update your tariff rates without reconfiguring:
 1. Go to **Settings → Devices & Services**
 2. Find the Hildebrand Glow integration
 3. Click **Configure**
-4. Update your rates
+4. Update your rates and enter the date on which each tariff became effective
+
+When a later tariff replaces an existing dated tariff, the integration retains
+the previous period for historical cost calculations.
 
 ## Energy Dashboard Setup
 
 To use with the Energy Dashboard:
 
 1. Go to **Settings → Dashboards → Energy**
-2. Add **Electricity grid consumption**: `sensor.smart_meter_electricity_consumption`
-3. Under **Cost tracking**, select **Use an entity with current price**, then choose **Electricity Unit Rate**
-4. Add **Gas consumption**: `sensor.smart_meter_gas_consumption`
-5. Under **Cost tracking**, select **Use an entity with current price**, then choose **Gas Unit Rate**
+2. Add **Electricity grid consumption**: `Hildebrand Glow Electricity Consumption`
+3. Under **Cost tracking**, select the total-cost option and choose **Hildebrand Glow Electricity Cost**
+4. Add **Gas consumption**: `Hildebrand Glow Gas Consumption`
+5. Under **Cost tracking**, select the total-cost option and choose **Hildebrand Glow Gas Cost**
+
+The cumulative cost statistics use the dated tariff applicable to each UK-local
+day and include exactly one standing charge per day. They do not add synthetic
+energy consumption.
 
 Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Daily Cost**, **Gas Daily Cost**, **Total Daily Energy Cost**, or **Daily Standing Charges** as Energy Dashboard total-cost inputs. These entities reset each day and are not lifetime accumulated cost sensors.
 
-### Historical statistics preview
+### Historical energy statistics
 
-Version 1.2.4 creates the following external statistics independently of the
+Version 1.3.0 creates the following external statistics independently of the
 existing sensor history:
 
 - `Hildebrand Glow Electricity Consumption`
 - `Hildebrand Glow Gas Consumption`
+- `Hildebrand Glow Electricity Cost`
+- `Hildebrand Glow Gas Cost`
 
 They are built from the real timestamped 30-minute Glowmarkt readings and are
 intended to replace daily-resetting or synthetic consumption entities in the
@@ -106,10 +117,10 @@ corrected Glowmarkt readings can be updated. Only complete UK-local days older
 than the finalization delay are imported. Zero-use days are retained, while a
 day with missing intervals stops the importer until Glowmarkt fills the gap.
 
-This preview imports consumption only. Continue using the existing Energy
-Dashboard configuration until the imported figures have been compared against
-Bright. Cumulative cost statistics, dated tariff periods, and standing-charge
-accounting will be added separately after consumption has been validated.
+Cost statistics are only created for dates covered by a configured tariff
+effective date. Unit cost is calculated from the real hourly consumption and
+the applicable rate; the daily standing charge is added to the first hour of
+each complete UK-local day.
 
 ## Data Availability
 

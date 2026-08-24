@@ -16,12 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching Glowmarkt data."""
 
-    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float], config_entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, Any], config_entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=DEFAULT_SCAN_INTERVAL)
         self.api_client = api_client
         self.tariff_config = tariff_config
         self._config_entry = config_entry
-        self.statistics_importer = GlowmarktStatisticsImporter(hass, api_client, config_entry.entry_id)
+        self.statistics_importer = GlowmarktStatisticsImporter(
+            hass, api_client, config_entry.entry_id, tariff_config
+        )
         self._statistics_task: asyncio.Task[None] | None = None
         self._last_statistics_start: datetime | None = None
         self._statistics_enabled = False
@@ -103,8 +105,10 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def resources(self) -> dict[str, dict[str, Any]]:
         return self._resources
 
-    def update_tariff_config(self, tariff_config: dict[str, float]) -> None:
+    def update_tariff_config(self, tariff_config: dict[str, Any]) -> None:
         self.tariff_config = tariff_config
+        self.statistics_importer.update_tariff_config(tariff_config)
+        self._last_statistics_start = None
     
     def clear_daily_cache(self) -> None:
         """Clear the cached readings (call at midnight)."""

@@ -1,5 +1,6 @@
 """Constants for the Hildebrand Glow integration."""
 from __future__ import annotations
+
 from datetime import timedelta
 from typing import Final
 
@@ -16,6 +17,9 @@ CONF_ELECTRICITY_RATE: Final = "electricity_rate"
 CONF_GAS_RATE: Final = "gas_rate"
 CONF_ELECTRICITY_STANDING_CHARGE: Final = "electricity_standing_charge"
 CONF_GAS_STANDING_CHARGE: Final = "gas_standing_charge"
+CONF_ELECTRICITY_TARIFF_EFFECTIVE_DATE: Final = "electricity_tariff_effective_date"
+CONF_GAS_TARIFF_EFFECTIVE_DATE: Final = "gas_tariff_effective_date"
+CONF_TARIFF_HISTORY: Final = "tariff_history"
 CLASSIFIER_ELECTRICITY_CONSUMPTION: Final = "electricity.consumption"
 CLASSIFIER_ELECTRICITY_COST: Final = "electricity.consumption.cost"
 CLASSIFIER_GAS_CONSUMPTION: Final = "gas.consumption"

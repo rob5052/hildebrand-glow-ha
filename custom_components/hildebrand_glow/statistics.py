@@ -49,10 +49,12 @@ class GlowmarktStatisticsImporter:
         hass: HomeAssistant,
         api_client: GlowmarktApiClient,
         entry_id: str,
+        tariff_config: dict[str, Any],
     ) -> None:
         self.hass = hass
         self.api_client = api_client
         self.entry_id = entry_id
+        self.tariff_config = tariff_config
         self._lock = asyncio.Lock()
         self.last_success: datetime | None = None
         self.last_error: str | None = None
@@ -61,6 +63,15 @@ class GlowmarktStatisticsImporter:
         """Return a stable statistic ID for one fuel."""
         safe_entry_id = re.sub(r"[^a-z0-9]+", "_", self.entry_id.lower()).strip("_")
         return f"{DOMAIN}:entry_{safe_entry_id}_{fuel}_consumption"
+
+    def cost_statistic_id(self, fuel: str) -> str:
+        """Return the paired cumulative-cost statistic ID."""
+        safe_entry_id = re.sub(r"[^a-z0-9]+", "_", self.entry_id.lower()).strip("_")
+        return f"{DOMAIN}:entry_{safe_entry_id}_{fuel}_cost"
+
+    def update_tariff_config(self, tariff_config: dict[str, Any]) -> None:
+        """Use updated tariff periods on the next synchronization."""
+        self.tariff_config = tariff_config
 
     async def async_sync(self, resources: dict[str, dict[str, Any]]) -> None:
         """Import all available finalized consumption data."""
@@ -106,12 +117,14 @@ class GlowmarktStatisticsImporter:
     async def _async_sync_resource(self, fuel: str, resource_id: str) -> None:
         statistic_id = self.statistic_id(fuel)
         recent = await self._async_get_recent_statistics(statistic_id)
+        cost_statistic_id = self.cost_statistic_id(fuel)
+        recent_cost = await self._async_get_recent_statistics(cost_statistic_id)
 
         today_uk = datetime.now(UK_TZ).date()
         cutoff_day = today_uk - timedelta(days=FINALIZATION_DELAY_DAYS)
         end_uk = datetime.combine(cutoff_day, time.min, UK_TZ)
 
-        if recent:
+        if recent and (recent_cost or not self._tariff_periods(fuel)):
             # Recorder does not guarantee that these rows are returned newest
             # first. Select by timestamp explicitly; using recent[0] can move
             # the reconciliation window backwards and reset its cumulative sum.
@@ -140,8 +153,17 @@ class GlowmarktStatisticsImporter:
             preceding = max(preceding_rows, key=lambda row: row["start"])
             baseline = float(preceding.get("sum") or 0.0)
 
+        cost_baseline = 0.0
+        preceding_cost_rows = [
+            row for row in recent_cost if row["start"] < start_timestamp
+        ]
+        if preceding_cost_rows:
+            preceding_cost = max(preceding_cost_rows, key=lambda row: row["start"])
+            cost_baseline = float(preceding_cost.get("sum") or 0.0)
+
         cursor = start_uk
         running_sum = baseline
+        cost_running_sum = cost_baseline
         import_started = bool(recent)
         while cursor < end_uk:
             chunk_end = min(cursor + timedelta(days=CHUNK_DAYS), end_uk)
@@ -169,6 +191,21 @@ class GlowmarktStatisticsImporter:
                     fuel,
                     complete_through,
                 )
+                cost_statistics, cost_running_sum = self._build_cost_statistics(
+                    statistics, cost_running_sum, fuel
+                )
+                if cost_statistics:
+                    async_add_external_statistics(
+                        self.hass,
+                        self._cost_metadata(cost_statistic_id, fuel),
+                        cost_statistics,
+                    )
+                    _LOGGER.info(
+                        "Imported %d hourly %s cost statistics through %s",
+                        len(cost_statistics),
+                        fuel,
+                        complete_through,
+                    )
 
             if complete_through < chunk_end.date():
                 _LOGGER.info(
@@ -190,6 +227,72 @@ class GlowmarktStatisticsImporter:
             unit_class=EnergyConverter.UNIT_CLASS,
             unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         )
+
+    @staticmethod
+    def _cost_metadata(statistic_id: str, fuel: str) -> StatisticMetaData:
+        """Return metadata for an Energy Dashboard-compatible cost statistic."""
+        return StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=f"Hildebrand Glow {fuel.title()} Cost",
+            source=DOMAIN,
+            statistic_id=statistic_id,
+            unit_class=None,
+            unit_of_measurement=None,
+        )
+
+    def _tariff_periods(self, fuel: str) -> list[tuple[date, float, float]]:
+        """Return all known tariff periods for a fuel, sorted by start date."""
+        periods: list[tuple[date, float, float]] = []
+        for item in self.tariff_config.get("tariff_history", []):
+            if item.get("fuel") == fuel:
+                periods.append(
+                    (
+                        date.fromisoformat(item["effective_from"]),
+                        float(item["unit_rate"]),
+                        float(item["standing_charge"]),
+                    )
+                )
+        effective = self.tariff_config.get(f"{fuel}_tariff_effective_date")
+        if effective:
+            periods.append(
+                (
+                    date.fromisoformat(effective),
+                    float(self.tariff_config[f"{fuel}_rate"]),
+                    float(self.tariff_config[f"{fuel}_standing_charge"]),
+                )
+            )
+        return sorted(set(periods), key=lambda period: period[0])
+
+    def _build_cost_statistics(
+        self,
+        consumption: list[StatisticData],
+        baseline: float,
+        fuel: str,
+    ) -> tuple[list[StatisticData], float]:
+        """Calculate hourly cumulative cost, charging standing once per local day."""
+        periods = self._tariff_periods(fuel)
+        if not periods:
+            return [], baseline
+
+        result: list[StatisticData] = []
+        running_sum = baseline
+        charged_day: date | None = None
+        for statistic in consumption:
+            start = statistic["start"]
+            local_day = start.astimezone(UK_TZ).date()
+            applicable = [period for period in periods if period[0] <= local_day]
+            if not applicable:
+                continue
+            _, unit_rate, standing_charge = applicable[-1]
+            state = float(statistic["state"] or 0.0) * unit_rate
+            if local_day != charged_day:
+                state += standing_charge
+                charged_day = local_day
+            state = round(state, 6)
+            running_sum = round(running_sum + state, 6)
+            result.append(StatisticData(start=start, state=state, sum=running_sum))
+        return result, running_sum
 
     @staticmethod
     def _build_statistics(
