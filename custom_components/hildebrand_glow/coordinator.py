@@ -1,21 +1,27 @@
 """Data update coordinator for Hildebrand Glow integration."""
 from __future__ import annotations
+import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
 from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
+from .statistics import GlowmarktStatisticsImporter
 
 _LOGGER = logging.getLogger(__name__)
 
 class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching Glowmarkt data."""
 
-    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float]) -> None:
+    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float], entry_id: str) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=DEFAULT_SCAN_INTERVAL)
         self.api_client = api_client
         self.tariff_config = tariff_config
+        self.statistics_importer = GlowmarktStatisticsImporter(hass, api_client, entry_id)
+        self._statistics_task: asyncio.Task[None] | None = None
+        self._last_statistics_start: datetime | None = None
         self._resources: dict[str, dict[str, Any]] = {}
         self._last_readings: dict[str, float] = {}  # Cache last known good readings
 
@@ -23,6 +29,8 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             if not self._resources:
                 self._resources = await self.api_client.discover_resources()
+
+            self._schedule_statistics_sync()
             
             readings = await self.api_client.get_all_readings()
             
@@ -64,6 +72,22 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Authentication error: {err}") from err
         except GlowmarktApiError as err:
             raise UpdateFailed(f"API error: {err}") from err
+
+    def _schedule_statistics_sync(self) -> None:
+        """Start a non-blocking historical sync at most every six hours."""
+        if self._statistics_task is not None and not self._statistics_task.done():
+            return
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_statistics_start is not None
+            and now - self._last_statistics_start < timedelta(hours=6)
+        ):
+            return
+        self._last_statistics_start = now
+        self._statistics_task = self.hass.async_create_task(
+            self.statistics_importer.async_sync(self._resources),
+            name=f"{DOMAIN} historical statistics sync",
+        )
 
     @property
     def resources(self) -> dict[str, dict[str, Any]]:

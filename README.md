@@ -13,6 +13,9 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 - **Tariff Configuration**: Set your own electricity and gas rates including standing charges
 - **Energy Dashboard Compatible**: Works with Home Assistant's Energy Dashboard
 - **Auto Updates**: Data refreshes every 5 minutes
+- **Accurate Historical Usage**: Imports finalized Glowmarkt half-hourly data
+  into integration-owned Home Assistant statistics without altering existing
+  Recorder statistics
 
 ## Sensors Created
 
@@ -84,6 +87,29 @@ To use with the Energy Dashboard:
 5. Under **Cost tracking**, select **Use an entity with current price**, then choose **Gas Unit Rate**
 
 Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Daily Cost**, **Gas Daily Cost**, **Total Daily Energy Cost**, or **Daily Standing Charges** as Energy Dashboard total-cost inputs. These entities reset each day and are not lifetime accumulated cost sensors.
+
+### Historical statistics preview
+
+Version 1.2.0 creates the following external statistics independently of the
+existing sensor history:
+
+- `Hildebrand Glow Electricity Consumption`
+- `Hildebrand Glow Gas Consumption`
+
+They are built from the real timestamped 30-minute Glowmarkt readings and are
+intended to replace daily-resetting or synthetic consumption entities in the
+Energy Dashboard after their values have been verified.
+
+The first synchronization imports up to 90 days in seven-day request windows.
+Subsequent synchronizations revisit the most recent seven days so delayed or
+corrected Glowmarkt readings can be updated. Only complete UK-local days older
+than the finalization delay are imported. Zero-use days are retained, while a
+day with missing intervals stops the importer until Glowmarkt fills the gap.
+
+This preview imports consumption only. Continue using the existing Energy
+Dashboard configuration until the imported figures have been compared against
+Bright. Cumulative cost statistics, dated tariff periods, and standing-charge
+accounting will be added separately after consumption has been validated.
 
 ## Data Availability
 

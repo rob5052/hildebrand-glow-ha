@@ -1,0 +1,236 @@
+"""Import delayed Glowmarkt consumption into Home Assistant statistics."""
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta, timezone
+import logging
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+)
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    get_last_statistics,
+)
+from homeassistant.const import UnitOfEnergy
+from homeassistant.core import HomeAssistant
+from homeassistant.util.unit_conversion import EnergyConverter
+
+from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
+from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
+
+UK_TZ = ZoneInfo("Europe/London")
+INITIAL_HISTORY_DAYS = 90
+RECONCILE_DAYS = 7
+CHUNK_DAYS = 7
+FINALIZATION_DELAY_DAYS = 2
+
+CONSUMPTION_CLASSIFIERS = {
+    "electricity.consumption": "electricity",
+    "gas.consumption": "gas",
+}
+
+
+class GlowmarktStatisticsImporter:
+    """Synchronize delayed Glowmarkt readings to owned external statistics."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api_client: GlowmarktApiClient,
+        entry_id: str,
+    ) -> None:
+        self.hass = hass
+        self.api_client = api_client
+        self.entry_id = entry_id
+        self._lock = asyncio.Lock()
+        self.last_success: datetime | None = None
+        self.last_error: str | None = None
+
+    def statistic_id(self, fuel: str) -> str:
+        """Return a stable statistic ID for one fuel."""
+        return f"{DOMAIN}:{self.entry_id}_{fuel}_consumption"
+
+    async def async_sync(self, resources: dict[str, dict[str, Any]]) -> None:
+        """Import all available finalized consumption data."""
+        if self._lock.locked():
+            return
+
+        async with self._lock:
+            try:
+                for classifier, fuel in CONSUMPTION_CLASSIFIERS.items():
+                    resource = resources.get(classifier)
+                    if resource is None:
+                        continue
+                    await self._async_sync_resource(
+                        fuel,
+                        resource["resource_id"],
+                    )
+            except (GlowmarktApiError, GlowmarktAuthError) as err:
+                self.last_error = str(err)
+                _LOGGER.warning("Historical statistics sync paused: %s", err)
+                return
+
+            self.last_success = datetime.now(timezone.utc)
+            self.last_error = None
+
+    async def _async_get_recent_statistics(
+        self, statistic_id: str
+    ) -> list[dict[str, Any]]:
+        """Return enough recent rows to establish an overlap baseline."""
+        result = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics,
+            self.hass,
+            RECONCILE_DAYS * 24 + 2,
+            statistic_id,
+            False,
+            {"sum"},
+        )
+        return result.get(statistic_id, [])
+
+    async def _async_sync_resource(self, fuel: str, resource_id: str) -> None:
+        statistic_id = self.statistic_id(fuel)
+        recent = await self._async_get_recent_statistics(statistic_id)
+
+        today_uk = datetime.now(UK_TZ).date()
+        cutoff_day = today_uk - timedelta(days=FINALIZATION_DELAY_DAYS)
+        end_uk = datetime.combine(cutoff_day, time.min, UK_TZ)
+
+        if recent:
+            latest_start = datetime.fromtimestamp(recent[0]["start"], timezone.utc)
+            start_uk = datetime.combine(
+                (latest_start.astimezone(UK_TZ).date() - timedelta(days=RECONCILE_DAYS)),
+                time.min,
+                UK_TZ,
+            )
+        else:
+            start_uk = datetime.combine(
+                today_uk - timedelta(days=INITIAL_HISTORY_DAYS),
+                time.min,
+                UK_TZ,
+            )
+
+        if start_uk >= end_uk:
+            return
+
+        baseline = 0.0
+        start_timestamp = start_uk.astimezone(timezone.utc).timestamp()
+        for row in recent:
+            if row["start"] < start_timestamp:
+                baseline = float(row.get("sum") or 0.0)
+                break
+
+        cursor = start_uk
+        running_sum = baseline
+        import_started = bool(recent)
+        while cursor < end_uk:
+            chunk_end = min(cursor + timedelta(days=CHUNK_DAYS), end_uk)
+            readings = await self.api_client.get_interval_readings(
+                resource_id,
+                cursor.astimezone(timezone.utc),
+                chunk_end.astimezone(timezone.utc),
+            )
+            statistics, running_sum, complete_through, import_started = self._build_statistics(
+                readings,
+                cursor.date(),
+                chunk_end.date(),
+                running_sum,
+                import_started,
+            )
+            if statistics:
+                async_add_external_statistics(
+                    self.hass,
+                    self._metadata(statistic_id, fuel),
+                    statistics,
+                )
+                _LOGGER.info(
+                    "Imported %d hourly %s statistics through %s",
+                    len(statistics),
+                    fuel,
+                    complete_through,
+                )
+
+            if complete_through < chunk_end.date():
+                _LOGGER.info(
+                    "Stopping %s import at incomplete Glowmarkt day %s",
+                    fuel,
+                    complete_through,
+                )
+                return
+            cursor = chunk_end
+
+    @staticmethod
+    def _metadata(statistic_id: str, fuel: str) -> StatisticMetaData:
+        return StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=f"Hildebrand Glow {fuel.title()} Consumption",
+            source=DOMAIN,
+            statistic_id=statistic_id,
+            unit_class=EnergyConverter.UNIT_CLASS,
+            unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        )
+
+    @staticmethod
+    def _build_statistics(
+        readings: list[tuple[datetime, float]],
+        start_day: date,
+        end_day: date,
+        baseline: float,
+        import_started: bool = True,
+    ) -> tuple[list[StatisticData], float, date, bool]:
+        """Build contiguous complete local-day hourly statistics.
+
+        A complete UK-local day contains one reading for every 30-minute UTC
+        slot. This naturally handles 23-hour and 25-hour DST days.
+        """
+        by_day: dict[date, dict[datetime, float]] = defaultdict(dict)
+        for timestamp, value in readings:
+            by_day[timestamp.astimezone(UK_TZ).date()][timestamp] = value
+
+        result: list[StatisticData] = []
+        running_sum = baseline
+        day = start_day
+        while day < end_day:
+            day_start = datetime.combine(day, time.min, UK_TZ).astimezone(timezone.utc)
+            next_start = datetime.combine(
+                day + timedelta(days=1), time.min, UK_TZ
+            ).astimezone(timezone.utc)
+            expected_slots = int((next_start - day_start).total_seconds() // 1800)
+            values = by_day.get(day, {})
+            expected_timestamps = {
+                day_start + timedelta(minutes=30 * index)
+                for index in range(expected_slots)
+            }
+            if set(values) != expected_timestamps:
+                if not import_started:
+                    # Accounts can begin part-way through the initial day.
+                    # Skip only leading incomplete days; gaps after the first
+                    # complete day stop the import so later sums cannot mask
+                    # missing consumption.
+                    day += timedelta(days=1)
+                    continue
+                return result, running_sum, day, import_started
+
+            import_started = True
+            hourly: dict[datetime, float] = defaultdict(float)
+            for timestamp in sorted(values):
+                hour = timestamp.replace(minute=0, second=0, microsecond=0)
+                hourly[hour] += values[timestamp]
+            for hour in sorted(hourly):
+                state = round(hourly[hour], 6)
+                running_sum = round(running_sum + state, 6)
+                result.append(
+                    StatisticData(start=hour, state=state, sum=running_sum)
+                )
+            day += timedelta(days=1)
+
+        return result, running_sum, end_day, import_started
