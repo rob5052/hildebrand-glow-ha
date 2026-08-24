@@ -106,3 +106,21 @@ def test_cost_statistics_include_one_daily_standing_charge() -> None:
     assert stats[0]["state"] == 0.53018
     assert all(stat["state"] == 0.01978 for stat in stats[1:])
     assert running == 10.98512
+
+
+def test_partial_statistics_use_all_currently_available_readings() -> None:
+    start = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    stats, running = GlowmarktStatisticsImporter._build_partial_statistics(
+        [
+            (start, 0.1),
+            (start + timedelta(minutes=30), 0.2),
+            (start + timedelta(hours=1), 0.0),
+        ],
+        20.0,
+    )
+
+    assert len(stats) == 2
+    assert stats[0]["state"] == 0.3
+    assert stats[0]["sum"] == 20.3
+    assert stats[1]["state"] == 0.0
+    assert running == 20.3

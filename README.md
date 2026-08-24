@@ -16,6 +16,9 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 - **Accurate Historical Usage**: Imports finalized Glowmarkt half-hourly data
   into integration-owned Home Assistant statistics without altering existing
   Recorder statistics
+- **Current Dashboard Usage**: Refreshes provisional readings for today and the
+  preceding two days every 30 minutes, then replaces them as Glowmarkt finalizes
+  the data
 
 ## Sensors Created
 
@@ -116,6 +119,12 @@ Subsequent synchronizations revisit the most recent seven days so delayed or
 corrected Glowmarkt readings can be updated. Only complete UK-local days older
 than the finalization delay are imported. Zero-use days are retained, while a
 day with missing intervals stops the importer until Glowmarkt fills the gap.
+
+Today and the preceding two UK-local days are also refreshed every 30 minutes
+from the half-hour readings currently available in Glowmarkt. These recent
+figures are provisional and may initially be low or move slightly as delayed
+readings arrive. They are overwritten by the finalized import automatically;
+no predicted or synthetic consumption is added.
 
 Cost statistics are only created for dates covered by a configured tariff
 effective date. Unit cost is calculated from the real hourly consumption and

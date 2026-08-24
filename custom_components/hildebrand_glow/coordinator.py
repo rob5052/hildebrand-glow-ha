@@ -26,6 +26,7 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._statistics_task: asyncio.Task[None] | None = None
         self._last_statistics_start: datetime | None = None
+        self._last_final_statistics_start: datetime | None = None
         self._statistics_enabled = False
         self._resources: dict[str, dict[str, Any]] = {}
         self._last_readings: dict[str, float] = {}  # Cache last known good readings
@@ -80,19 +81,27 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"API error: {err}") from err
 
     def _schedule_statistics_sync(self) -> None:
-        """Start a non-blocking historical sync at most every six hours."""
+        """Refresh provisional statistics every 30 minutes and final data every six hours."""
         if self._statistics_task is not None and not self._statistics_task.done():
             return
         now = datetime.now(timezone.utc)
         if (
             self._last_statistics_start is not None
-            and now - self._last_statistics_start < timedelta(hours=6)
+            and now - self._last_statistics_start < timedelta(minutes=30)
         ):
             return
+        sync_finalized = (
+            self._last_final_statistics_start is None
+            or now - self._last_final_statistics_start >= timedelta(hours=6)
+        )
         self._last_statistics_start = now
+        if sync_finalized:
+            self._last_final_statistics_start = now
         self._statistics_task = self._config_entry.async_create_background_task(
             self.hass,
-            self.statistics_importer.async_sync(self._resources),
+            self.statistics_importer.async_sync(
+                self._resources, sync_finalized=sync_finalized
+            ),
             name=f"{DOMAIN} historical statistics sync",
         )
 
@@ -109,6 +118,7 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.tariff_config = tariff_config
         self.statistics_importer.update_tariff_config(tariff_config)
         self._last_statistics_start = None
+        self._last_final_statistics_start = None
     
     def clear_daily_cache(self) -> None:
         """Clear the cached readings (call at midnight)."""

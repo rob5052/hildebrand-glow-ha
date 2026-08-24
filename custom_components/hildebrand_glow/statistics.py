@@ -73,8 +73,12 @@ class GlowmarktStatisticsImporter:
         """Use updated tariff periods on the next synchronization."""
         self.tariff_config = tariff_config
 
-    async def async_sync(self, resources: dict[str, dict[str, Any]]) -> None:
-        """Import all available finalized consumption data."""
+    async def async_sync(
+        self,
+        resources: dict[str, dict[str, Any]],
+        sync_finalized: bool = True,
+    ) -> None:
+        """Import finalized history and refresh provisional recent readings."""
         if self._lock.locked():
             return
 
@@ -84,7 +88,12 @@ class GlowmarktStatisticsImporter:
                     resource = resources.get(classifier)
                     if resource is None:
                         continue
-                    await self._async_sync_resource(
+                    if sync_finalized:
+                        await self._async_sync_resource(
+                            fuel,
+                            resource["resource_id"],
+                        )
+                    await self._async_sync_provisional(
                         fuel,
                         resource["resource_id"],
                     )
@@ -95,6 +104,68 @@ class GlowmarktStatisticsImporter:
 
             self.last_success = datetime.now(timezone.utc)
             self.last_error = None
+
+    async def _async_sync_provisional(self, fuel: str, resource_id: str) -> None:
+        """Refresh today and the two not-yet-final UK-local days."""
+        statistic_id = self.statistic_id(fuel)
+        cost_statistic_id = self.cost_statistic_id(fuel)
+        recent = await self._async_get_recent_statistics(statistic_id)
+        recent_cost = await self._async_get_recent_statistics(cost_statistic_id)
+
+        now_uk = datetime.now(UK_TZ)
+        start_day = now_uk.date() - timedelta(days=FINALIZATION_DELAY_DAYS)
+        start_uk = datetime.combine(start_day, time.min, UK_TZ)
+        start_timestamp = start_uk.astimezone(timezone.utc).timestamp()
+
+        baseline = self._baseline_before(recent, start_timestamp)
+        cost_baseline = self._baseline_before(recent_cost, start_timestamp)
+        readings = await self.api_client.get_interval_readings(
+            resource_id,
+            start_uk.astimezone(timezone.utc),
+            now_uk.astimezone(timezone.utc),
+        )
+        statistics, _ = self._build_partial_statistics(readings, baseline)
+        if not statistics:
+            return
+
+        async_add_external_statistics(
+            self.hass,
+            self._metadata(statistic_id, fuel),
+            statistics,
+        )
+        _LOGGER.info(
+            "Refreshed %d provisional hourly %s statistics through %s",
+            len(statistics),
+            fuel,
+            now_uk.date(),
+        )
+
+        cost_statistics, _ = self._build_cost_statistics(
+            statistics, cost_baseline, fuel
+        )
+        if cost_statistics:
+            async_add_external_statistics(
+                self.hass,
+                self._cost_metadata(cost_statistic_id, fuel),
+                cost_statistics,
+            )
+            _LOGGER.info(
+                "Refreshed %d provisional hourly %s cost statistics through %s",
+                len(cost_statistics),
+                fuel,
+                now_uk.date(),
+            )
+
+    @staticmethod
+    def _baseline_before(
+        statistics: list[dict[str, Any]], start_timestamp: float
+    ) -> float:
+        """Return the cumulative sum immediately before a requested window."""
+        preceding = [row for row in statistics if row["start"] < start_timestamp]
+        if not preceding:
+            return 0.0
+        row = max(preceding, key=lambda item: item["start"])
+        return float(row.get("sum") or 0.0)
 
     async def _async_get_recent_statistics(
         self, statistic_id: str
@@ -146,20 +217,9 @@ class GlowmarktStatisticsImporter:
         if start_uk >= end_uk:
             return
 
-        baseline = 0.0
         start_timestamp = start_uk.astimezone(timezone.utc).timestamp()
-        preceding_rows = [row for row in recent if row["start"] < start_timestamp]
-        if preceding_rows:
-            preceding = max(preceding_rows, key=lambda row: row["start"])
-            baseline = float(preceding.get("sum") or 0.0)
-
-        cost_baseline = 0.0
-        preceding_cost_rows = [
-            row for row in recent_cost if row["start"] < start_timestamp
-        ]
-        if preceding_cost_rows:
-            preceding_cost = max(preceding_cost_rows, key=lambda row: row["start"])
-            cost_baseline = float(preceding_cost.get("sum") or 0.0)
+        baseline = self._baseline_before(recent, start_timestamp)
+        cost_baseline = self._baseline_before(recent_cost, start_timestamp)
 
         cursor = start_uk
         running_sum = baseline
@@ -292,6 +352,24 @@ class GlowmarktStatisticsImporter:
             state = round(state, 6)
             running_sum = round(running_sum + state, 6)
             result.append(StatisticData(start=start, state=state, sum=running_sum))
+        return result, running_sum
+
+    @staticmethod
+    def _build_partial_statistics(
+        readings: list[tuple[datetime, float]], baseline: float
+    ) -> tuple[list[StatisticData], float]:
+        """Build cumulative hourly statistics from currently available readings."""
+        hourly: dict[datetime, float] = defaultdict(float)
+        for timestamp, value in readings:
+            hour = timestamp.replace(minute=0, second=0, microsecond=0)
+            hourly[hour] += value
+
+        result: list[StatisticData] = []
+        running_sum = baseline
+        for hour in sorted(hourly):
+            state = round(hourly[hour], 6)
+            running_sum = round(running_sum + state, 6)
+            result.append(StatisticData(start=hour, state=state, sum=running_sum))
         return result, running_sum
 
     @staticmethod
