@@ -89,10 +89,14 @@ class GlowmarktStatisticsImporter:
         self, statistic_id: str
     ) -> list[dict[str, Any]]:
         """Return enough recent rows to establish an overlap baseline."""
+        # The reconciliation start is derived from the latest row's local date
+        # and therefore spans parts of eight dates. Keep two additional days so
+        # an existing broken boundary can still be reached and repaired.
+        row_limit = (RECONCILE_DAYS + 2) * 25 + 1
         result = await get_instance(self.hass).async_add_executor_job(
             get_last_statistics,
             self.hass,
-            RECONCILE_DAYS * 24 + 2,
+            row_limit,
             statistic_id,
             False,
             {"sum"},
