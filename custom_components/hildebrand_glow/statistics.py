@@ -108,7 +108,12 @@ class GlowmarktStatisticsImporter:
         end_uk = datetime.combine(cutoff_day, time.min, UK_TZ)
 
         if recent:
-            latest_start = datetime.fromtimestamp(recent[0]["start"], timezone.utc)
+            # Recorder does not guarantee that these rows are returned newest
+            # first. Select by timestamp explicitly; using recent[0] can move
+            # the reconciliation window backwards and reset its cumulative sum.
+            latest_start = datetime.fromtimestamp(
+                max(row["start"] for row in recent), timezone.utc
+            )
             start_uk = datetime.combine(
                 (latest_start.astimezone(UK_TZ).date() - timedelta(days=RECONCILE_DAYS)),
                 time.min,
@@ -126,10 +131,10 @@ class GlowmarktStatisticsImporter:
 
         baseline = 0.0
         start_timestamp = start_uk.astimezone(timezone.utc).timestamp()
-        for row in recent:
-            if row["start"] < start_timestamp:
-                baseline = float(row.get("sum") or 0.0)
-                break
+        preceding_rows = [row for row in recent if row["start"] < start_timestamp]
+        if preceding_rows:
+            preceding = max(preceding_rows, key=lambda row: row["start"])
+            baseline = float(preceding.get("sum") or 0.0)
 
         cursor = start_uk
         running_sum = baseline
