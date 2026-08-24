@@ -38,7 +38,7 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Use cached readings for the data
             merged_readings = {k: self._last_readings.get(k) for k in readings.keys()}
             
-            data: dict[str, Any] = {"readings": merged_readings, "resources": self._resources, "costs": {}}
+            data: dict[str, Any] = {"readings": merged_readings, "resources": self._resources, "costs": {}, "tariffs": self.tariff_config.copy()}
             
             elec = merged_readings.get("electricity.consumption")
             if elec is not None:

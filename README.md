@@ -9,7 +9,7 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 ## Features
 
 - **Easy Setup**: Configure through the Home Assistant UI - no YAML required
-- **8 Sensors**: Electricity consumption, gas consumption, API costs, calculated daily costs with standing charges
+- **12 Sensors**: Electricity and gas consumption, tariff rates, API costs, and calculated daily costs with standing charges
 - **Tariff Configuration**: Set your own electricity and gas rates including standing charges
 - **Energy Dashboard Compatible**: Works with Home Assistant's Energy Dashboard
 - **Auto Updates**: Data refreshes every 5 minutes
@@ -20,12 +20,16 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 |--------|-------------|
 | Electricity Consumption | Daily electricity usage (kWh) |
 | Gas Consumption | Daily gas usage (kWh) |
-| Electricity Cost (API) | Cost from Glowmarkt API |
-| Gas Cost (API) | Cost from Glowmarkt API |
-| Electricity Daily Cost | Calculated: (usage × rate) + standing charge |
-| Gas Daily Cost | Calculated: (usage × rate) + standing charge |
-| Total Daily Energy Cost | Combined electricity + gas costs |
-| Daily Standing Charges | Total standing charges |
+| Electricity Cost (API) | Daily-resetting cost from Glowmarkt API (GBP) |
+| Gas Cost (API) | Daily-resetting cost from Glowmarkt API (GBP) |
+| Electricity Daily Cost | Daily-resetting calculated cost: (usage × rate) + standing charge (GBP) |
+| Gas Daily Cost | Daily-resetting calculated cost: (usage × rate) + standing charge (GBP) |
+| Total Daily Energy Cost | Daily-resetting combined electricity + gas costs (GBP) |
+| Daily Standing Charges | Daily-resetting total standing charges (GBP) |
+| Electricity Unit Rate | Configured electricity unit rate (GBP/kWh) |
+| Gas Unit Rate | Configured gas unit rate (GBP/kWh) |
+| Electricity Standing Charge | Configured electricity standing charge (GBP/day) |
+| Gas Standing Charge | Configured gas standing charge (GBP/day) |
 
 ## Prerequisites
 
@@ -75,8 +79,11 @@ To use with the Energy Dashboard:
 
 1. Go to **Settings → Dashboards → Energy**
 2. Add **Electricity grid consumption**: `sensor.smart_meter_electricity_consumption`
-3. Add **Gas consumption**: `sensor.smart_meter_gas_consumption`
-4. Set your tariff rates
+3. Under **Cost tracking**, select **Use an entity with current price**, then choose **Electricity Unit Rate**
+4. Add **Gas consumption**: `sensor.smart_meter_gas_consumption`
+5. Under **Cost tracking**, select **Use an entity with current price**, then choose **Gas Unit Rate**
+
+Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Daily Cost**, **Gas Daily Cost**, **Total Daily Energy Cost**, or **Daily Standing Charges** as Energy Dashboard total-cost inputs. These entities reset each day and are not lifetime accumulated cost sensors.
 
 ## Data Availability
 
