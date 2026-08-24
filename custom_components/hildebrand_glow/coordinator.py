@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
@@ -15,11 +16,12 @@ _LOGGER = logging.getLogger(__name__)
 class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching Glowmarkt data."""
 
-    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float], entry_id: str) -> None:
+    def __init__(self, hass: HomeAssistant, api_client: GlowmarktApiClient, tariff_config: dict[str, float], config_entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=DEFAULT_SCAN_INTERVAL)
         self.api_client = api_client
         self.tariff_config = tariff_config
-        self.statistics_importer = GlowmarktStatisticsImporter(hass, api_client, entry_id)
+        self._config_entry = config_entry
+        self.statistics_importer = GlowmarktStatisticsImporter(hass, api_client, config_entry.entry_id)
         self._statistics_task: asyncio.Task[None] | None = None
         self._last_statistics_start: datetime | None = None
         self._resources: dict[str, dict[str, Any]] = {}
@@ -84,7 +86,8 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             return
         self._last_statistics_start = now
-        self._statistics_task = self.hass.async_create_task(
+        self._statistics_task = self._config_entry.async_create_background_task(
+            self.hass,
             self.statistics_importer.async_sync(self._resources),
             name=f"{DOMAIN} historical statistics sync",
         )
