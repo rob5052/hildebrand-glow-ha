@@ -24,6 +24,7 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.statistics_importer = GlowmarktStatisticsImporter(hass, api_client, config_entry.entry_id)
         self._statistics_task: asyncio.Task[None] | None = None
         self._last_statistics_start: datetime | None = None
+        self._statistics_enabled = False
         self._resources: dict[str, dict[str, Any]] = {}
         self._last_readings: dict[str, float] = {}  # Cache last known good readings
 
@@ -32,7 +33,8 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not self._resources:
                 self._resources = await self.api_client.discover_resources()
 
-            self._schedule_statistics_sync()
+            if self._statistics_enabled:
+                self._schedule_statistics_sync()
             
             readings = await self.api_client.get_all_readings()
             
@@ -91,6 +93,11 @@ class GlowmarktDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.statistics_importer.async_sync(self._resources),
             name=f"{DOMAIN} historical statistics sync",
         )
+
+    def start_statistics_sync(self) -> None:
+        """Enable and start historical synchronization after setup completes."""
+        self._statistics_enabled = True
+        self._schedule_statistics_sync()
 
     @property
     def resources(self) -> dict[str, dict[str, Any]]:

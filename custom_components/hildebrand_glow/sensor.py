@@ -37,7 +37,6 @@ SENSOR_DESCRIPTIONS: dict[str, dict[str, Any]] = {
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: GlowmarktDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
     entities: list[GlowmarktSensor] = []
-    await coordinator.async_config_entry_first_refresh()
     for sensor_key, description in SENSOR_DESCRIPTIONS.items():
         entities.append(GlowmarktSensor(coordinator=coordinator, sensor_key=sensor_key, description=description, entry_id=config_entry.entry_id))
     async_add_entities(entities)
