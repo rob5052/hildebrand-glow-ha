@@ -11,6 +11,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import GlowmarktApiClient, GlowmarktApiError, GlowmarktAuthError
@@ -30,18 +31,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _iso_date(value: Any) -> str:
-    """Validate and retain an ISO calendar date."""
-    try:
-        parsed = date.fromisoformat(str(value))
-    except ValueError as err:
-        raise vol.Invalid("Date must use YYYY-MM-DD") from err
-    return parsed.isoformat()
-
-
-_ISO_DATE = vol.All(str, _iso_date)
+_ISO_DATE = selector.DateSelector()
 
 
 def _tariff_schema(current: dict[str, Any]) -> vol.Schema:
