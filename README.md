@@ -41,7 +41,7 @@ A Home Assistant custom integration for UK SMETS2 smart meters using the Hildebr
 
 1. A UK SMETS2 smart meter
 2. A [Hildebrand Bright app](https://www.hildebrand.co.uk/bright/) account linked to your smart meter
-3. Home Assistant 2024.1.0 or newer
+3. Home Assistant 2025.12.0 or newer (tested on Home Assistant 2026.8.3)
 
 ## Installation
 
@@ -102,7 +102,7 @@ Do not select **Electricity Cost (API)**, **Gas Cost (API)**, **Electricity Dail
 
 ### Historical energy statistics
 
-Version 1.4.0 creates the following external statistics independently of the
+Version 1.4.0 and later create the following external statistics independently of the
 existing sensor history:
 
 - `Hildebrand Glow Electricity Consumption`
